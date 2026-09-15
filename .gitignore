@@ -1,0 +1,7 @@
+schedule_data/
+*.json
+__pycache__/
+*.py
+*.txt
+*.log
+.git/
