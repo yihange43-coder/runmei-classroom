@@ -550,9 +550,14 @@
             availableDays = [];
 
             for (const entry of allEntries) {
-                const building = extractBuilding(entry.location);
-                if (!buildings[building]) buildings[building] = new Set();
-                buildings[building].add(entry.location);
+                if (entry.location.includes('未排地点')) continue;
+
+                const campus = extractCampus(entry.location);
+                const bldg = extractBuilding(entry.location);
+                const key = campus + ' ' + bldg;
+
+                if (!buildings[key]) buildings[key] = { campus, building: bldg, rooms: new Set() };
+                buildings[key].rooms.add(entry.location);
 
                 if (entry.day > 0 && !availableDays.includes(entry.day)) availableDays.push(entry.day);
 
@@ -574,15 +579,23 @@
             if (maxWeek === 0) maxWeek = 20;
         }
 
-        function extractBuilding(location) {
-            const match = location.match(/([\u4e00-\u9fa5]+?楼)/);
-            if (match) return match[1];
-            const parts = location.split(/\s+/);
-            return parts[parts.length - 1] || '未知';
+        function extractCampus(location) {
+            const match = location.match(/^(南校区|北校区|东校区|西校区)/);
+            return match ? match[1] : '其他';
         }
 
-        function getRooms(building) {
-            return Array.from(buildings[building] || []).sort();
+        function extractBuilding(location) {
+            const rest = location.replace(/^(南校区|北校区|东校区|西校区)\s*/, '');
+            const m = rest.match(/([\u4e00-\u9fa5]+?(?:楼|馆|中心|大楼|操场|平房))/);
+            if (m) return m[1];
+            const parts = rest.split(/\s+/);
+            return parts[0] || '未知';
+        }
+
+        function getRooms(buildingKey) {
+            const b = buildings[buildingKey];
+            if (!b) return [];
+            return Array.from(b.rooms).sort();
         }
 
         function isBusy(room, week, day, section) {
@@ -602,14 +615,30 @@
         function initQuery() {
             const buildingSelect = document.getElementById('buildingSelect');
             buildingSelect.innerHTML = '';
-            const sortedBuildings = Object.keys(buildings).sort();
-            for (const b of sortedBuildings) {
-                const opt = document.createElement('option');
-                opt.value = b;
-                opt.textContent = b + ' (' + buildings[b].size + '间)';
-                buildingSelect.appendChild(opt);
+
+            const sortedKeys = Object.keys(buildings).sort();
+            const campusOrder = ['南校区', '北校区', '东校区', '西校区', '其他'];
+            const campusMap = {};
+            for (const k of sortedKeys) {
+                const c = buildings[k].campus;
+                if (!campusMap[c]) campusMap[c] = [];
+                campusMap[c].push(k);
             }
-            if (sortedBuildings.length > 0) currentBuilding = sortedBuildings[0];
+
+            for (const campus of campusOrder) {
+                if (!campusMap[campus]) continue;
+                const group = document.createElement('optgroup');
+                group.label = campus;
+                for (const k of campusMap[campus]) {
+                    const opt = document.createElement('option');
+                    opt.value = k;
+                    opt.textContent = buildings[k].building + ' (' + buildings[k].rooms.size + '间)';
+                    group.appendChild(opt);
+                }
+                buildingSelect.appendChild(group);
+            }
+
+            if (sortedKeys.length > 0) currentBuilding = sortedKeys[0];
             buildingSelect.onchange = () => { currentBuilding = buildingSelect.value; render(); };
 
             const weekBtns = document.getElementById('weekBtns');
@@ -633,10 +662,12 @@
             }
             if (availableDays.length > 0) currentDay = availableDays[0];
 
+            const totalRooms = Object.keys(occupied).length;
             document.getElementById('dataSummary').innerHTML =
-                '<div class="summary-item">解析课表 <b>' + countFiles() + '</b> 份</div>' +
-                '<div class="summary-item">教学楼 <b>' + sortedBuildings.length + '</b> 个</div>' +
-                '<div class="summary-item">教室 <b>' + Object.keys(occupied).length + '</b> 间</div>' +
+                '<div class="summary-item">解析记录 <b>' + countFiles() + '</b> 条</div>' +
+                '<div class="summary-item">校区 <b>' + Object.keys(campusMap).length + '</b> 个</div>' +
+                '<div class="summary-item">教学楼 <b>' + sortedKeys.length + '</b> 栋</div>' +
+                '<div class="summary-item">教室 <b>' + totalRooms + '</b> 间</div>' +
                 '<div class="summary-item">总周数 <b>' + maxWeek + '</b></div>';
 
             render();
@@ -674,8 +705,10 @@
                 }
                 if (allFree) freeCount++;
             }
+            const b = buildings[currentBuilding];
+            const label = b ? b.campus + ' · ' + b.building : currentBuilding;
             document.getElementById('statsBar').innerHTML =
-                '<b>' + currentBuilding + '</b> · 第 <b>' + currentWeek + ' 周</b> · <b>' + dayNames[currentDay] +
+                '<b>' + label + '</b> · 第 <b>' + currentWeek + ' 周</b> · <b>' + dayNames[currentDay] +
                 '</b> &nbsp;|&nbsp; 完全空闲：<span class="badge badge-free">' + freeCount + ' 间</span> / 共 ' + rooms.length + ' 间';
         }
 
