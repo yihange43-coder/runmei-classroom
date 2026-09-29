@@ -580,13 +580,13 @@
         }
 
         function extractCampus(location) {
-            const match = location.match(/^(南校区|北校区|东校区|西校区)/);
+            const match = location.match(/^(南校区|北校区)/);
             return match ? match[1] : '其他';
         }
 
         function extractBuilding(location) {
-            const rest = location.replace(/^(南校区|北校区|东校区|西校区)\s*/, '');
-            const m = rest.match(/([\u4e00-\u9fa5]+?(?:楼|馆|中心|大楼|操场|平房))/);
+            const rest = location.replace(/^(南校区|北校区)\s*/, '');
+            const m = rest.match(/([\u4e00-\u9fa5]+?(?:楼|馆|湖|中心|大楼|操场|平房|实训基地|实验室|实训室))/);
             if (m) return m[1];
             const parts = rest.split(/\s+/);
             return parts[0] || '未知';
@@ -617,7 +617,7 @@
             buildingSelect.innerHTML = '';
 
             const sortedKeys = Object.keys(buildings).sort();
-            const campusOrder = ['南校区', '北校区', '东校区', '西校区', '其他'];
+            const campusOrder = ['南校区', '北校区', '其他'];
             const campusMap = {};
             for (const k of sortedKeys) {
                 const c = buildings[k].campus;
