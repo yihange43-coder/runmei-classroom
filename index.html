@@ -552,10 +552,12 @@
             for (const entry of allEntries) {
                 if (entry.location.includes('未排地点')) continue;
 
+                const campus = extractCampus(entry.location);
                 const bldg = extractBuilding(entry.location);
+                const key = campus + ' ' + bldg;
 
-                if (!buildings[bldg]) buildings[bldg] = { building: bldg, rooms: new Set() };
-                buildings[bldg].rooms.add(entry.location);
+                if (!buildings[key]) buildings[key] = { campus, building: bldg, rooms: new Set() };
+                buildings[key].rooms.add(entry.location);
 
                 if (entry.day > 0 && !availableDays.includes(entry.day)) availableDays.push(entry.day);
 
@@ -577,9 +579,14 @@
             if (maxWeek === 0) maxWeek = 20;
         }
 
+        function extractCampus(location) {
+            const match = location.match(/^(南校区|北校区|东校区|西校区)/);
+            return match ? match[1] : '其他';
+        }
+
         function extractBuilding(location) {
             const rest = location.replace(/^(南校区|北校区|东校区|西校区)\s*/, '');
-            const m = rest.match(/([\u4e00-\u9fa5]+?(?:楼|馆|湖|中心|大楼|操场|平房|实训基地|实验室|实训室))/);
+            const m = rest.match(/([\u4e00-\u9fa5]+?(?:楼|馆|湖|中心|大楼|操场|实训基地|实验室|实训室))/);
             if (m) return m[1];
             const parts = rest.split(/\s+/);
             return parts[0] || '未知';
@@ -609,15 +616,26 @@
             const buildingSelect = document.getElementById('buildingSelect');
             buildingSelect.innerHTML = '';
 
-            const sortedKeys = Object.keys(buildings).sort((a, b) => {
-                return buildings[b].rooms.size - buildings[a].rooms.size;
-            });
-
+            const sortedKeys = Object.keys(buildings).sort();
+            const campusOrder = ['南校区', '北校区', '东校区', '西校区', '其他'];
+            const campusMap = {};
             for (const k of sortedKeys) {
-                const opt = document.createElement('option');
-                opt.value = k;
-                opt.textContent = k + ' (' + buildings[k].rooms.size + '间)';
-                buildingSelect.appendChild(opt);
+                const c = buildings[k].campus;
+                if (!campusMap[c]) campusMap[c] = [];
+                campusMap[c].push(k);
+            }
+
+            for (const campus of campusOrder) {
+                if (!campusMap[campus]) continue;
+                const group = document.createElement('optgroup');
+                group.label = campus;
+                for (const k of campusMap[campus]) {
+                    const opt = document.createElement('option');
+                    opt.value = k;
+                    opt.textContent = buildings[k].building + ' (' + buildings[k].rooms.size + '间)';
+                    group.appendChild(opt);
+                }
+                buildingSelect.appendChild(group);
             }
 
             if (sortedKeys.length > 0) currentBuilding = sortedKeys[0];
@@ -647,6 +665,7 @@
             const totalRooms = Object.keys(occupied).length;
             document.getElementById('dataSummary').innerHTML =
                 '<div class="summary-item">解析记录 <b>' + countFiles() + '</b> 条</div>' +
+                '<div class="summary-item">校区 <b>' + Object.keys(campusMap).length + '</b> 个</div>' +
                 '<div class="summary-item">教学楼 <b>' + sortedKeys.length + '</b> 栋</div>' +
                 '<div class="summary-item">教室 <b>' + totalRooms + '</b> 间</div>' +
                 '<div class="summary-item">总周数 <b>' + maxWeek + '</b></div>';
@@ -686,7 +705,8 @@
                 }
                 if (allFree) freeCount++;
             }
-            const label = currentBuilding;
+            const b = buildings[currentBuilding];
+            const label = b ? b.campus + ' · ' + b.building : currentBuilding;
             document.getElementById('statsBar').innerHTML =
                 '<b>' + label + '</b> · 第 <b>' + currentWeek + ' 周</b> · <b>' + dayNames[currentDay] +
                 '</b> &nbsp;|&nbsp; 完全空闲：<span class="badge badge-free">' + freeCount + ' 间</span> / 共 ' + rooms.length + ' 间';
