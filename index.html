@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>空教室查询平台</title>
+    <title>拾空教室</title>
     <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
     <style>
@@ -168,8 +168,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>空教室查询平台</h1>
-            <p>上传任意课表压缩包，自动解析生成空教室查询</p>
+            <h1>拾空教室</h1>
+            <p>上传课表，自动查找空闲教室</p>
         </div>
 
         <!-- Upload Section -->
@@ -586,7 +586,7 @@
 
         function extractBuilding(location) {
             const rest = location.replace(/^(南校区|北校区|东校区|西校区)\s*/, '');
-            const m = rest.match(/([\u4e00-\u9fa5]+?(?:楼|馆|湖|中心|大楼|操场|实训基地|实验室|实训室))/);
+            const m = rest.match(/([\u4e00-\u9fa5]+?(?:楼|馆|中心|大楼|操场|平房))/);
             if (m) return m[1];
             const parts = rest.split(/\s+/);
             return parts[0] || '未知';
