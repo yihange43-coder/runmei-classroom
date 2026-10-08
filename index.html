@@ -174,6 +174,9 @@
 
         <!-- Upload Section -->
         <div class="card" id="uploadSection">
+            <div id="hasDataHint" style="display:none;background:#e8f5e9;color:#2e7d32;padding:8px 14px;border-radius:8px;margin-bottom:12px;font-size:0.82rem;">
+                已有上次的课表数据，上传新文件将替换旧数据
+            </div>
             <div class="upload-area" id="uploadArea">
                 <div class="upload-icon">📁</div>
                 <div class="upload-title">拖拽文件到此处，或点击选择文件</div>
@@ -220,7 +223,7 @@
                     </div>
                     <div class="filter-group" style="margin-left:auto;">
                         <label>&nbsp;</label>
-                        <button class="btn btn-secondary" onclick="resetAll()">重新上传</button>
+                        <button class="btn btn-secondary" onclick="switchTimetable()">换课表</button>
                     </div>
                 </div>
                 <div class="legend">
@@ -337,16 +340,23 @@
 
             allEntries = [];
             const xlsFiles = [];
+            let hasRar = false;
 
             for (const f of files) {
+                if (f.name.match(/\.rar$/i)) { hasRar = true; continue; }
                 if (f.name.match(/\.zip$/i)) {
                     try {
                         const zip = await JSZip.loadAsync(f);
                         const zipEntries = Object.values(zip.files);
                         const xlsInZip = zipEntries.filter(e => !e.dir && e.name.match(/\.(xls|xlsx)$/i));
+                        if (xlsInZip.length === 0) {
+                            // check if there are .rar files inside
+                            const rarInZip = zipEntries.filter(e => !e.dir && e.name.match(/\.rar$/i));
+                            if (rarInZip.length > 0) hasRar = true;
+                        }
                         for (let i = 0; i < xlsInZip.length; i++) {
                             const entry = xlsInZip[i];
-                            updateStatus(`解压 ZIP: ${entry.name} (${i+1}/${xlsInZip.length})`);
+                            updateStatus(`解压: ${entry.name.split('/').pop()} (${i+1}/${xlsInZip.length})`);
                             try {
                                 const ab = await entry.async('arraybuffer');
                                 xlsFiles.push({ name: entry.name.split('/').pop(), content: ab });
@@ -354,16 +364,31 @@
                         }
                     } catch(e) {
                         alert('ZIP 解压失败: ' + e.message);
+                        resetAll();
+                        return;
                     }
                 } else if (f.name.match(/\.(xls|xlsx)$/i)) {
-                    const ab = await f.arrayBuffer();
-                    xlsFiles.push({ name: f.name, content: ab });
+                    try {
+                        const ab = await f.arrayBuffer();
+                        xlsFiles.push({ name: f.name, content: ab });
+                    } catch(e) {
+                        console.warn('Failed to read file', f.name, e);
+                    }
                 }
+            }
+
+            if (xlsFiles.length === 0) {
+                let msg = '没有找到 Excel 课表文件。';
+                if (hasRar) msg += '\n\n检测到 RAR 格式文件，暂不支持 RAR。请先解压 RAR，再上传 .xls 文件或打包为 ZIP。';
+                msg += '\n\n支持的格式：.zip 压缩包、.xls、.xlsx';
+                alert(msg);
+                resetAll();
+                return;
             }
 
             const total = xlsFiles.length;
             for (let i = 0; i < total; i++) {
-                updateStatus(`解析课表: ${xlsFiles[i].name} (${i+1}/${total})`);
+                updateStatus(`解析中: ${xlsFiles[i].name} (${i+1}/${total})`);
                 document.getElementById('progressBar').style.width = ((i+1)/total*100) + '%';
                 try {
                     const wb = XLSX.read(xlsFiles[i].content, { type: 'array' });
@@ -373,18 +398,65 @@
                 }
             }
 
-            updateStatus('构建查询数据...');
+            updateStatus('整理数据中...');
             buildDataStructures();
 
             if (allEntries.length === 0) {
-                alert('未找到有效的课表数据，请检查文件格式。');
+                alert('未能解析出有效的课表数据。\n\n请确认：\n1. 课表 Excel 中包含"周一~周日"表头\n2. 课程单元格格式为：课程名/(节次)/地点/教师\n3. 地点字段中包含楼名（如"润美楼""博学楼"等）');
                 resetAll();
                 return;
             }
 
             document.getElementById('processingSection').style.display = 'none';
             document.getElementById('querySection').style.display = '';
+            saveToLocal();
             initQuery();
+        }
+
+        // ============ LocalStorage Persistence ============
+        const STORAGE_KEY = 'shikong_classroom_data';
+
+        function saveToLocal() {
+            try {
+                const payload = {
+                    entries: allEntries,
+                    timestamp: Date.now(),
+                    count: allEntries.length
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+            } catch(e) {
+                console.warn('Failed to save to localStorage:', e);
+            }
+        }
+
+        function loadFromLocal() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (!raw) return false;
+                const payload = JSON.parse(raw);
+                if (!payload.entries || payload.entries.length === 0) return false;
+                allEntries = payload.entries;
+                buildDataStructures();
+                if (allEntries.length === 0) return false;
+                document.getElementById('uploadSection').style.display = 'none';
+                document.getElementById('querySection').style.display = '';
+                initQuery();
+                return true;
+            } catch(e) {
+                console.warn('Failed to load from localStorage:', e);
+                return false;
+            }
+        }
+
+        function switchTimetable() {
+            document.getElementById('querySection').style.display = 'none';
+            document.getElementById('uploadSection').style.display = '';
+            fileInput.value = '';
+            if (allEntries.length > 0) {
+                document.getElementById('hasDataHint').style.display = '';
+            }
+            const area = document.getElementById('uploadArea');
+            area.scrollIntoView({ behavior: 'smooth' });
         }
 
         function updateStatus(msg) {
@@ -550,14 +622,13 @@
             availableDays = [];
 
             for (const entry of allEntries) {
-                if (entry.location.includes('未排地点')) continue;
+                if (!entry.location || entry.location.includes('未排地点')) continue;
 
-                const campus = extractCampus(entry.location);
                 const bldg = extractBuilding(entry.location);
-                const key = campus + ' ' + bldg;
+                if (!bldg || bldg === '未知') continue;
 
-                if (!buildings[key]) buildings[key] = { campus, building: bldg, rooms: new Set() };
-                buildings[key].rooms.add(entry.location);
+                if (!buildings[bldg]) buildings[bldg] = { building: bldg, rooms: new Set() };
+                buildings[bldg].rooms.add(entry.location);
 
                 if (entry.day > 0 && !availableDays.includes(entry.day)) availableDays.push(entry.day);
 
@@ -579,17 +650,13 @@
             if (maxWeek === 0) maxWeek = 20;
         }
 
-        function extractCampus(location) {
-            const match = location.match(/^(南校区|北校区|东校区|西校区)/);
-            return match ? match[1] : '其他';
-        }
-
         function extractBuilding(location) {
             const rest = location.replace(/^(南校区|北校区|东校区|西校区)\s*/, '');
-            const m = rest.match(/([\u4e00-\u9fa5]+?(?:楼|馆|中心|大楼|操场|平房))/);
+            const m = rest.match(/([\u4e00-\u9fa5]+?(?:楼|馆|湖|中心|大楼|操场|实训基地|实验室|实训室|体育馆))/);
             if (m) return m[1];
-            const parts = rest.split(/\s+/);
-            return parts[0] || '未知';
+            const parts = rest.split(/\s+/).filter(p => p);
+            if (parts.length > 0 && parts[0].match(/^[\u4e00-\u9fa5A-Za-z]/)) return parts[0];
+            return '未知';
         }
 
         function getRooms(buildingKey) {
@@ -616,26 +683,15 @@
             const buildingSelect = document.getElementById('buildingSelect');
             buildingSelect.innerHTML = '';
 
-            const sortedKeys = Object.keys(buildings).sort();
-            const campusOrder = ['南校区', '北校区', '东校区', '西校区', '其他'];
-            const campusMap = {};
-            for (const k of sortedKeys) {
-                const c = buildings[k].campus;
-                if (!campusMap[c]) campusMap[c] = [];
-                campusMap[c].push(k);
-            }
+            const sortedKeys = Object.keys(buildings).sort((a, b) => {
+                return buildings[b].rooms.size - buildings[a].rooms.size;
+            });
 
-            for (const campus of campusOrder) {
-                if (!campusMap[campus]) continue;
-                const group = document.createElement('optgroup');
-                group.label = campus;
-                for (const k of campusMap[campus]) {
-                    const opt = document.createElement('option');
-                    opt.value = k;
-                    opt.textContent = buildings[k].building + ' (' + buildings[k].rooms.size + '间)';
-                    group.appendChild(opt);
-                }
-                buildingSelect.appendChild(group);
+            for (const k of sortedKeys) {
+                const opt = document.createElement('option');
+                opt.value = k;
+                opt.textContent = k + ' (' + buildings[k].rooms.size + '间)';
+                buildingSelect.appendChild(opt);
             }
 
             if (sortedKeys.length > 0) currentBuilding = sortedKeys[0];
@@ -664,8 +720,7 @@
 
             const totalRooms = Object.keys(occupied).length;
             document.getElementById('dataSummary').innerHTML =
-                '<div class="summary-item">解析记录 <b>' + countFiles() + '</b> 条</div>' +
-                '<div class="summary-item">校区 <b>' + Object.keys(campusMap).length + '</b> 个</div>' +
+                '<div class="summary-item">解析课程 <b>' + countFiles() + '</b> 条</div>' +
                 '<div class="summary-item">教学楼 <b>' + sortedKeys.length + '</b> 栋</div>' +
                 '<div class="summary-item">教室 <b>' + totalRooms + '</b> 间</div>' +
                 '<div class="summary-item">总周数 <b>' + maxWeek + '</b></div>';
@@ -705,8 +760,7 @@
                 }
                 if (allFree) freeCount++;
             }
-            const b = buildings[currentBuilding];
-            const label = b ? b.campus + ' · ' + b.building : currentBuilding;
+            const label = currentBuilding;
             document.getElementById('statsBar').innerHTML =
                 '<b>' + label + '</b> · 第 <b>' + currentWeek + ' 周</b> · <b>' + dayNames[currentDay] +
                 '</b> &nbsp;|&nbsp; 完全空闲：<span class="badge badge-free">' + freeCount + ' 间</span> / 共 ' + rooms.length + ' 间';
@@ -806,6 +860,20 @@
             document.getElementById('querySection').style.display = 'none';
             fileInput.value = '';
         }
+
+        // ============ Auto-load on page open ============
+        (function autoLoad() {
+            const loaded = loadFromLocal();
+            if (loaded) {
+                // Add a small banner showing data was restored
+                const banner = document.createElement('div');
+                banner.style.cssText = 'position:fixed;top:12px;right:12px;background:#e8f5e9;color:#2e7d32;padding:8px 16px;border-radius:8px;font-size:0.82rem;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:50;cursor:pointer;';
+                banner.innerHTML = '已自动加载上次课表 · 点击换课表';
+                banner.onclick = switchTimetable;
+                document.body.appendChild(banner);
+                setTimeout(() => { banner.style.transition = 'opacity 0.5s'; banner.style.opacity = '0'; setTimeout(() => banner.remove(), 500); }, 4000);
+            }
+        })();
     </script>
 </body>
 </html>
